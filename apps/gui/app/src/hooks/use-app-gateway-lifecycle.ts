@@ -41,7 +41,7 @@ function gatewayArray<T>(value: T[] | unknown): T[] {
 }
 
 const BOOTSTRAP_REQUEST_TIMEOUT_MS = 20_000;
-const PROVIDER_USAGE_REFRESH_MS = 60_000;
+const USAGE_REFRESH_MS = 15_000;
 
 export function useAppGatewayLifecycle(options: {
   state: Accessor<AppState>;
@@ -68,6 +68,8 @@ export function useAppGatewayLifecycle(options: {
     openSession,
   } = options;
   const connection = createMemo(() => state().connection);
+  const directory = createMemo(() => state().directory);
+  const selectedSessionId = createMemo(() => state().selectedSessionId);
 
   createEffect(() => {
     if (
@@ -115,14 +117,24 @@ export function useAppGatewayLifecycle(options: {
     if (e2eFixture || connection() !== "connected") {
       return;
     }
+    const client = rootClient();
+    const scoped = client.withDirectory(directory());
+    const activeSessionId = selectedSessionId();
     const refresh = async () => {
-      const usage = await safe(() => rootClient().providerUsage("codex"), undefined);
-      if (usage) {
-        setState((previous) => ({ ...previous, providerUsage: usage }));
-      }
+      const [providerUsage, session] = await Promise.all([
+        safe(() => client.providerUsage("codex"), undefined),
+        activeSessionId
+          ? safe(() => scoped.session(activeSessionId), undefined)
+          : Promise.resolve(undefined),
+      ]);
+      setState((previous) => ({
+        ...previous,
+        ...(providerUsage ? { providerUsage } : {}),
+        ...(session ? { sessions: mergeSessions([session], previous.sessions) } : {}),
+      }));
     };
     void refresh();
-    const timer = window.setInterval(refresh, PROVIDER_USAGE_REFRESH_MS);
+    const timer = window.setInterval(refresh, USAGE_REFRESH_MS);
     onCleanup(() => window.clearInterval(timer));
   });
 

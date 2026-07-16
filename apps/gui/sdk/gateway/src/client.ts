@@ -190,6 +190,10 @@ export class GatewayClient {
     return this.get("/project");
   }
 
+  session(sessionId: string): Promise<Session> {
+    return this.get(`/session/${encodeURIComponent(sessionId)}`);
+  }
+
   sessions(input: { limit?: number; search?: string } = {}): Promise<Session[]> {
     if (!input.search) {
       return this.sessionLogSessions({

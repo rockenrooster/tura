@@ -1,4 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import * as solid from "../../app/node_modules/solid-js/dist/solid.js";
 
 mock.module("solid-js", () => solid);
@@ -7,10 +8,20 @@ const { createRoot, createSignal } = solid;
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
+const lifecycleSource = readFileSync(
+  new URL("../../app/src/hooks/use-app-gateway-lifecycle.ts", import.meta.url),
+  "utf8",
+);
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
   globalThis.window = originalWindow;
+});
+
+test("usage refresh polls limits and selected-session context every 15 seconds", () => {
+  expect(lifecycleSource).toContain("const USAGE_REFRESH_MS = 15_000");
+  expect(lifecycleSource).toContain('client.providerUsage("codex")');
+  expect(lifecycleSource).toContain("scoped.session(activeSessionId)");
 });
 
 test("gateway startup failure exits the loading state", async () => {
