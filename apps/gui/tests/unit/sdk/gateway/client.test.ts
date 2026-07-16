@@ -37,6 +37,25 @@ describe("GatewayClient", () => {
     expect(messages[0]?.parts[0]?.text).toBe("hello");
   });
 
+  test("reads selected-session and all-session token usage", async () => {
+    const seen: string[] = [];
+    const client = new GatewayClient({
+      baseUrl: "http://gateway.test",
+      fetch: async (input) => {
+        seen.push(String(input));
+        return jsonResponse({ context_tokens: { input: 0, limit: 128_000 }, tokens: {} });
+      },
+    });
+
+    await client.sessionUsage("session 1");
+    await client.allSessionUsage();
+
+    expect(seen).toEqual([
+      "http://gateway.test/session/session%201/usage",
+      "http://gateway.test/usage/sessions",
+    ]);
+  });
+
   test("maps About operations to the shared fixed Gateway endpoints", async () => {
     const seen: Array<{ method: string; url: string; body?: unknown }> = [];
     const client = new GatewayClient({

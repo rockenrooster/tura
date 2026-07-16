@@ -25,6 +25,7 @@ import type {
   QuestionRequest,
   ServiceStatusResponse,
   Session,
+  SessionUsage,
   StartCondition,
   StoredPersona,
   TodoItem,
@@ -107,6 +108,8 @@ export type AppState = {
   currentProject?: CurrentProjectResponse;
   projects: Project[];
   sessions: Session[];
+  sessionUsageBySession: Record<string, SessionUsage>;
+  sessionUsageUpdatedAtBySession: Record<string, number>;
   messagesBySession: Record<string, Message[]>;
   messagePagingBySession: Record<string, { hasEarlier: boolean; loadingEarlier: boolean }>;
   transcriptScrollBySession: Record<string, number>;
@@ -157,6 +160,8 @@ export function initialAppState(gatewayUrl = "http://127.0.0.1:4126"): AppState 
     sessionsLoading: true,
     bootstrapped: false,
     sessions: [],
+    sessionUsageBySession: {},
+    sessionUsageUpdatedAtBySession: {},
     workspaces: [],
     productIssues: [],
     productProjects: [],

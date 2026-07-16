@@ -41,6 +41,7 @@ import type {
   ProviderListResponse,
   ServiceStatusResponse,
   Session,
+  SessionUsage,
   SessionLogSnapshot,
   SessionLogRecordsResponse,
   SessionLogSessionsResponse,
@@ -192,6 +193,14 @@ export class GatewayClient {
 
   session(sessionId: string): Promise<Session> {
     return this.get(`/session/${encodeURIComponent(sessionId)}`);
+  }
+
+  sessionUsage(sessionId: string): Promise<SessionUsage> {
+    return this.get(`/session/${encodeURIComponent(sessionId)}/usage`);
+  }
+
+  allSessionUsage(): Promise<SessionUsage> {
+    return this.get("/usage/sessions");
   }
 
   sessions(input: { limit?: number; search?: string } = {}): Promise<Session[]> {

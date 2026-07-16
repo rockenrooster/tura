@@ -127,10 +127,28 @@ export function useAppGatewayLifecycle(options: {
           ? safe(() => scoped.session(activeSessionId), undefined)
           : Promise.resolve(undefined),
       ]);
+      const sessionUsage =
+        activeSessionId &&
+        (state().sessionUsageBySession[activeSessionId] === undefined ||
+          state().sessionUsageUpdatedAtBySession[activeSessionId] !== session?.updated_at)
+          ? await safe(() => scoped.sessionUsage(activeSessionId), undefined)
+          : undefined;
       setState((previous) => ({
         ...previous,
         ...(providerUsage ? { providerUsage } : {}),
         ...(session ? { sessions: mergeSessions([session], previous.sessions) } : {}),
+        ...(activeSessionId && sessionUsage
+          ? {
+              sessionUsageBySession: {
+                ...previous.sessionUsageBySession,
+                [activeSessionId]: sessionUsage,
+              },
+              sessionUsageUpdatedAtBySession: {
+                ...previous.sessionUsageUpdatedAtBySession,
+                [activeSessionId]: session?.updated_at ?? 0,
+              },
+            }
+          : {}),
       }));
     };
     void refresh();

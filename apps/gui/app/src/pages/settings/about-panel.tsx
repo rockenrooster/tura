@@ -1,13 +1,16 @@
 import type { AboutOpenTarget, AboutUpdate } from "@tura/gateway-sdk";
 import { createResource, createSignal, Show } from "solid-js";
+import { sessionTotalTokens } from "../../conversation/token-savings";
 import { useGlobalGateway } from "../../context/gateway";
-import { t } from "../../i18n";
+import { currentLanguage, t } from "../../i18n";
 
 type AboutAction = "star" | "report" | "contribute" | "update" | "contact" | "install";
 
 export function AboutPanel(props: { sessionId?: string }) {
   const { rootClient } = useGlobalGateway();
   const [info] = createResource(rootClient, (client) => client.aboutInfo());
+  const [usage] = createResource(rootClient, (client) => client.allSessionUsage());
+  const allObservedTokens = () => sessionTotalTokens(usage()?.tokens);
   const [busy, setBusy] = createSignal<AboutAction>();
   const [notice, setNotice] = createSignal<string>();
   const [starred, setStarred] = createSignal(false);
@@ -112,6 +115,24 @@ export function AboutPanel(props: { sessionId?: string }) {
             </div>
           )}
         </Show>
+      </section>
+
+      <section class="settings-panel">
+        <header>
+          <span>{t("aboutTokenUsage")}</span>
+        </header>
+        <div class="settings-fields">
+          <div class="field-row readonly-row">
+            <span>{t("allObservedTokens")}</span>
+            <code>
+              {allObservedTokens() === undefined
+                ? usage.loading
+                  ? t("loading")
+                  : "--"
+                : new Intl.NumberFormat(currentLanguage()).format(allObservedTokens() ?? 0)}
+            </code>
+          </div>
+        </div>
       </section>
 
       <section class="settings-panel">

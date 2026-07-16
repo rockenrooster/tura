@@ -22,6 +22,7 @@ test("usage refresh polls limits and selected-session context every 15 seconds",
   expect(lifecycleSource).toContain("const USAGE_REFRESH_MS = 15_000");
   expect(lifecycleSource).toContain('client.providerUsage("codex")');
   expect(lifecycleSource).toContain("scoped.session(activeSessionId)");
+  expect(lifecycleSource).toContain("scoped.sessionUsage(activeSessionId)");
 });
 
 test("gateway startup failure exits the loading state", async () => {

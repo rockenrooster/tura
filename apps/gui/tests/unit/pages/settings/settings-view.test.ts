@@ -158,6 +158,7 @@ describe("MainTabs", () => {
       expect(settingsViewSource).toContain('props.section === "about"');
       for (const method of [
         "aboutInfo",
+        "allSessionUsage",
         "starTuraRepository",
         "openAboutTarget",
         "checkTuraUpdate",
@@ -178,6 +179,7 @@ describe("MainTabs", () => {
         expect(gatewayServerSource).toContain(route);
       }
       expect(aboutPanelSource).toContain('class="name-dialog"');
+      expect(gatewayServerSource).toContain('"/usage/sessions"');
       expect(aboutPanelSource).toContain('t("aboutUpdateWarning"');
     });
   });

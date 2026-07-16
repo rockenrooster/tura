@@ -61,6 +61,12 @@ import {
 } from "./message-tools";
 import { assistantFooterMetaText } from "./assistant-footer-meta";
 import { transcriptNearBottom } from "./transcript-scroll";
+import {
+  benchmarkTokenSavings,
+  formatTokenCount,
+  observedTurnTokens,
+  sessionTotalTokens,
+} from "./token-savings";
 
 const INSPECTOR_MIN_WIDTH = 320;
 const INSPECTOR_MAX_WIDTH = 680;
@@ -151,6 +157,16 @@ export function ConversationView(props: {
       ? props.state.providerUsage
       : undefined,
   );
+  const tokenComparison = createMemo(() => {
+    const session = props.session;
+    if (!session) return;
+    const totalTokens = sessionTotalTokens(props.state.sessionUsageBySession[session.id]?.tokens);
+    if (totalTokens === undefined) return;
+    return {
+      totalTokens,
+      projection: benchmarkTokenSavings(session.agent, totalTokens),
+    };
+  });
   const latestMessageId = createMemo(() => groupedMessages().at(-1)?.id);
   const latestMessageLiveSignature = createMemo(() => {
     const message = groupedMessages().at(-1);
@@ -428,7 +444,7 @@ export function ConversationView(props: {
           <span>{t("conversation")}</span>
           <h1>{props.session ? sessionTitle(props.session) : t("newSession")}</h1>
         </div>
-        <Show when={!props.compact && (contextTokens() || providerUsage())}>
+        <Show when={!props.compact && (contextTokens() || providerUsage() || tokenComparison())}>
           <div class="usage-meters">
             <Show when={contextTokens()} keyed>
               {(tokens) => (
@@ -456,6 +472,30 @@ export function ConversationView(props: {
                 );
               }}
             </For>
+            <Show when={tokenComparison()} keyed>
+              {(comparison) => (
+                <>
+                  <div class="usage-meter">
+                    <span>{t("sessionTokens")}</span>
+                    <span>{formatTokenCount(comparison.totalTokens, currentLanguage())}</span>
+                  </div>
+                  <Show when={comparison.projection} keyed>
+                    {(projection) => (
+                      <div
+                        class="usage-meter"
+                        title={t("benchmarkTokenSavingsHint", {
+                          agent: props.session?.agent ?? "Tura",
+                          rate: (projection.rate * 100).toFixed(1),
+                        })}
+                      >
+                        <span>{t("benchmarkTokenSavings")}</span>
+                        <span>~{formatTokenCount(projection.savedTokens, currentLanguage())}</span>
+                      </div>
+                    )}
+                  </Show>
+                </>
+              )}
+            </Show>
           </div>
         </Show>
       </header>
@@ -483,6 +523,11 @@ export function ConversationView(props: {
             expressionEmoji={latestStickerEmoji()}
             workspaceDirectory={props.state.directory}
             gatewayUrl={props.state.gatewayUrl}
+            observedTokens={
+              props.session
+                ? props.state.sessionUsageBySession[props.session.id]?.tokens
+                : undefined
+            }
             followBottom={transcriptPinned()}
             onFollowBottom={() => scrollTranscriptToBottom("auto")}
             onTranscript={(element) => {
@@ -587,6 +632,7 @@ function Transcript(props: {
   expressionEmoji?: string;
   workspaceDirectory?: string;
   gatewayUrl?: string;
+  observedTokens?: unknown;
   followBottom: boolean;
   onFollowBottom: () => void;
   onTranscript: (element: HTMLElement) => void;
@@ -1151,6 +1197,10 @@ function Transcript(props: {
                       sessionStatus={props.session?.status}
                       workspaceDirectory={props.workspaceDirectory}
                       gatewayUrl={props.gatewayUrl}
+                      observedTokens={observedTurnTokens(
+                        props.observedTokens,
+                        entry.item().message.id,
+                      )}
                       showAvatarSpace={
                         avatarMode() !== "hidden" && entry.item().message.role !== "user"
                       }
@@ -1306,6 +1356,7 @@ function VirtualMessageCell(props: {
   sessionStatus?: Session["status"];
   workspaceDirectory?: string;
   gatewayUrl?: string;
+  observedTokens?: number;
   showAvatarSpace: boolean;
   onTool: (part: MessagePart, parts: MessagePart[]) => void;
   onMeasure: (messageId: string, height: number, top: number) => void;
@@ -1352,6 +1403,7 @@ function VirtualMessageCell(props: {
         sessionStatus={props.sessionStatus}
         workspaceDirectory={props.workspaceDirectory}
         gatewayUrl={props.gatewayUrl}
+        observedTokens={props.observedTokens}
         showAvatarSpace={props.showAvatarSpace}
         onTool={props.onTool}
       />
@@ -1368,6 +1420,7 @@ function MessageCell(props: {
   sessionStatus?: Session["status"];
   workspaceDirectory?: string;
   gatewayUrl?: string;
+  observedTokens?: number;
   showAvatarSpace: boolean;
   onTool: (part: MessagePart, parts: MessagePart[]) => void;
 }) {
@@ -1412,7 +1465,9 @@ function MessageCell(props: {
   );
   const assistantFooterText = createMemo(() => assistantFooterMetaText(props.message));
   const turnDuration = createMemo(() => formatDuration(messageDurationMs(props.message)));
-  const showAssistantMeta = createMemo(() => hasSummary() && !isAgentWorking());
+  const showAssistantMeta = createMemo(
+    () => (hasSummary() || Boolean(props.observedTokens)) && !isAgentWorking(),
+  );
   const [userExpanded, setUserExpanded] = createSignal(false);
   const userTextSignature = createMemo(() =>
     textParts()
@@ -1528,6 +1583,18 @@ function MessageCell(props: {
               </Index>
               <Show when={showAssistantMeta()}>
                 <div class="message-head assistant-meta">
+                  <Show when={props.observedTokens}>
+                    {(tokens) => (
+                      <>
+                        <span>
+                          {t("observedTokens")} {formatTokenCount(tokens(), currentLanguage())}
+                        </span>
+                        <span class="assistant-meta-separator" aria-hidden="true">
+                          ·
+                        </span>
+                      </>
+                    )}
+                  </Show>
                   <Show when={assistantFooterText()}>
                     {(footerText) => (
                       <>

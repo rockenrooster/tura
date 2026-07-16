@@ -15,6 +15,201 @@ pub fn list_messages_value(session_id: &str, params: &MessageListParams) -> Vec<
         .collect()
 }
 
+pub async fn session_usage(Path(session_id): Path<String>) -> Json<SessionUsage> {
+    Json(session_usage_value(&session_id).await)
+}
+
+pub async fn all_session_usage() -> Json<SessionUsage> {
+    Json(all_session_usage_value().await)
+}
+
+async fn session_usage_value(session_id: &str) -> SessionUsage {
+    let context_tokens = session_store()
+        .get_session(session_id)
+        .map(|session| session.context_tokens)
+        .unwrap_or_default();
+    let session_id = session_id.to_string();
+    let record_session_id = session_id.clone();
+    let tokens = match tokio::task::spawn_blocking(move || {
+        session_usage_records(&record_session_id)
+    })
+    .await
+    {
+        Ok(Ok(records)) => aggregate_runtime_usage(&records, true),
+        Ok(Err(error)) => {
+            tracing::warn!(session_id, error = %error, "failed to read cumulative session usage");
+            serde_json::Value::Null
+        }
+        Err(error) => {
+            tracing::warn!(session_id, error = %error, "session usage worker failed");
+            serde_json::Value::Null
+        }
+    };
+    SessionUsage::new(context_tokens, tokens)
+}
+
+async fn all_session_usage_value() -> SessionUsage {
+    let tokens = match tokio::task::spawn_blocking(all_session_usage_records).await {
+        Ok(Ok(records)) => aggregate_runtime_usage(&records, false),
+        Ok(Err(error)) => {
+            tracing::warn!(error = %error, "failed to read all-session usage");
+            serde_json::Value::Null
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "all-session usage worker failed");
+            serde_json::Value::Null
+        }
+    };
+    SessionUsage::new(SessionContextTokens::default(), tokens)
+}
+
+fn session_usage_records(session_id: &str) -> anyhow::Result<Vec<serde_json::Value>> {
+    const PAGE_SIZE: u64 = 500;
+
+    let client = crate::session_db_client::SessionDbClient::discover()?;
+    session_usage_records_with_client(&client, session_id, PAGE_SIZE)
+}
+
+fn all_session_usage_records() -> anyhow::Result<Vec<serde_json::Value>> {
+    const PAGE_SIZE: u64 = 500;
+
+    let client = crate::session_db_client::SessionDbClient::discover()?;
+    let mut session_ids = std::collections::HashSet::new();
+    for workspace in client.list_workspaces()? {
+        let (page, sessions) =
+            client.list_session_summaries(workspace.directory.clone(), 0, PAGE_SIZE)?;
+        session_ids.extend(sessions.into_iter().map(|session| session.session_id));
+        let page_count = page.total.div_ceil(page.page_size.max(1));
+        for page in 1..page_count {
+            let (_, sessions) =
+                client.list_session_summaries(workspace.directory.clone(), page, PAGE_SIZE)?;
+            session_ids.extend(sessions.into_iter().map(|session| session.session_id));
+        }
+    }
+
+    let mut records = Vec::new();
+    for session_id in session_ids {
+        records.extend(session_usage_records_with_client(
+            &client,
+            &session_id,
+            PAGE_SIZE,
+        )?);
+    }
+    Ok(records)
+}
+
+fn session_usage_records_with_client(
+    client: &crate::session_db_client::SessionDbClient,
+    session_id: &str,
+    page_size: u64,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    let (page, records) = client.list_session_records(session_id.to_string(), 0, page_size)?;
+    let mut values = records
+        .into_iter()
+        .map(|record| record.record)
+        .filter(is_runtime_usage_record)
+        .collect::<Vec<_>>();
+    let page_size = page.page_size.max(1);
+    let page_count = page.total.div_ceil(page_size);
+    for page in 1..page_count {
+        let (_, records) = client.list_session_records(session_id.to_string(), page, page_size)?;
+        values.extend(
+            records
+                .into_iter()
+                .map(|record| record.record)
+                .filter(is_runtime_usage_record),
+        );
+    }
+    Ok(values)
+}
+
+fn is_runtime_usage_record(record: &serde_json::Value) -> bool {
+    record.get("type").and_then(serde_json::Value::as_str) == Some("runtime_usage")
+}
+
+fn aggregate_runtime_usage(
+    records: &[serde_json::Value],
+    include_turns: bool,
+) -> serde_json::Value {
+    let mut runtime_ids = std::collections::HashSet::new();
+    let mut turns = serde_json::Map::new();
+    let mut input_tokens = 0_u64;
+    let mut output_tokens = 0_u64;
+    let mut total_tokens = 0_u64;
+    let mut cached_input_tokens = 0_u64;
+    let mut cache_write_tokens = 0_u64;
+    let mut reasoning_tokens = 0_u64;
+    let mut total_cost = 0.0_f64;
+    let mut currency = None;
+
+    for (index, record) in records.iter().enumerate() {
+        if !is_runtime_usage_record(record) {
+            continue;
+        }
+        let runtime_id = record
+            .get("runtime_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("record-{index}"));
+        let Some(usage) = record.get("usage").filter(|usage| usage.is_object()) else {
+            continue;
+        };
+        if !runtime_ids.insert(runtime_id.clone()) {
+            continue;
+        }
+        let input = usage_u64(usage, "input_tokens");
+        let output = usage_u64(usage, "output_tokens");
+        input_tokens = input_tokens.saturating_add(input);
+        output_tokens = output_tokens.saturating_add(output);
+        let turn_total = usage
+            .get("total_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_else(|| input.saturating_add(output));
+        total_tokens = total_tokens.saturating_add(turn_total);
+        if include_turns {
+            turns.insert(runtime_id, serde_json::Value::from(turn_total));
+        }
+        cached_input_tokens =
+            cached_input_tokens.saturating_add(usage_u64(usage, "cached_input_tokens"));
+        cache_write_tokens =
+            cache_write_tokens.saturating_add(usage_u64(usage, "cache_write_tokens"));
+        reasoning_tokens = reasoning_tokens.saturating_add(usage_u64(usage, "reasoning_tokens"));
+        total_cost += usage
+            .get("total_cost")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0);
+        if currency.is_none() {
+            currency = usage
+                .get("currency")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+        }
+    }
+
+    let mut result = serde_json::json!({
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "cache_write_tokens": cache_write_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "provider_calls": runtime_ids.len(),
+        "total_cost": total_cost,
+        "currency": currency.unwrap_or_else(|| "USD".to_string()),
+    });
+    if include_turns {
+        result["turns"] = serde_json::Value::Object(turns);
+    }
+    result
+}
+
+fn usage_u64(usage: &serde_json::Value, key: &str) -> u64 {
+    usage
+        .get(key)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+}
+
 fn page_messages<T: Clone + MessageId>(messages: Vec<T>, params: &MessageListParams) -> Vec<T> {
     let limit = params.limit.filter(|limit| *limit > 0);
     if let Some(after) = params.after.as_deref() {
@@ -942,6 +1137,42 @@ pub async fn update_todos(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn session_usage_totals_each_runtime_once() {
+        let runtime_record = |runtime_id: &str, input: u64, total: u64| {
+            json!({
+                "type": "runtime_usage",
+                "runtime_id": runtime_id,
+                "usage": {
+                    "input_tokens": input,
+                    "output_tokens": 5,
+                    "total_tokens": total,
+                    "cached_input_tokens": 3,
+                    "reasoning_tokens": 2,
+                    "total_cost": 0.1,
+                    "currency": "USD"
+                }
+            })
+        };
+        let totals = aggregate_runtime_usage(
+            &[
+                runtime_record("runtime-1", 10, 15),
+                runtime_record("runtime-1", 10, 15),
+                runtime_record("runtime-2", 20, 25),
+                json!({ "type": "assistant", "usage": { "total_tokens": 999 } }),
+            ],
+            true,
+        );
+
+        assert_eq!(totals["input_tokens"], 30);
+        assert_eq!(totals["total_tokens"], 40);
+        assert_eq!(totals["cached_input_tokens"], 6);
+        assert_eq!(totals["provider_calls"], 2);
+        assert_eq!(totals["total_cost"], 0.2);
+        assert_eq!(totals["turns"]["runtime-1"], 15);
+        assert_eq!(totals["turns"]["runtime-2"], 25);
+    }
 
     fn request(reply_message: &str) -> SendAgentMessageRequest {
         SendAgentMessageRequest {

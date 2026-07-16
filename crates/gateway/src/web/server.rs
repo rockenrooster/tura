@@ -119,6 +119,11 @@ pub fn build_router() -> Router {
             get(api::session::list_messages),
         )
         .route(
+            "/session/{sessionID}/usage",
+            get(api::session::session_usage),
+        )
+        .route("/usage/sessions", get(api::session::all_session_usage))
+        .route(
             "/session/{sessionID}/events",
             get(api::global::session_event),
         )
