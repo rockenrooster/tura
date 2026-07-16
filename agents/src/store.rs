@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 pub const AGENTS_DIR: &str = "agents/src";
 pub const AGENT_CONFIG_FILE: &str = "agent_config.json";
 pub const AGENT_PROMPT_FILE: &str = "prompt.md";
+pub const AGENT_CONFIG_ROOT_ENV: &str = "TURA_AGENT_CONFIG_ROOT";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentConfig {
@@ -199,11 +200,10 @@ pub fn delete_dynamic_agent(project_root: &Path, agent_id: &str) -> Result<bool,
 }
 
 fn writable_project_root(project_root: &Path) -> PathBuf {
-    if tura_path::build_kind() == "release" {
-        tura_path::home_runtime_dir()
-    } else {
-        project_root.to_path_buf()
-    }
+    std::env::var_os(AGENT_CONFIG_ROOT_ENV)
+        .filter(|root| !root.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| project_root.to_path_buf())
 }
 
 pub fn default_agent_config(project_root: &Path, agent_id: &str) -> Result<AgentConfig, String> {

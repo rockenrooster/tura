@@ -321,6 +321,14 @@ fn configure_release_runtime_env() {
     if std::env::var_os("TURA_PROJECT_ROOT").is_none() {
         std::env::set_var("TURA_PROJECT_ROOT", &root);
     }
+    if tura_path::build_kind() == "release"
+        && std::env::var_os(tura_agents::store::AGENT_CONFIG_ROOT_ENV).is_none()
+    {
+        std::env::set_var(
+            tura_agents::store::AGENT_CONFIG_ROOT_ENV,
+            tura_path::home_runtime_dir(),
+        );
+    }
     if std::env::var_os("TURA_PROVIDER_CONFIG").is_none() {
         let provider_config = PathBuf::from(&root)
             .join("config")

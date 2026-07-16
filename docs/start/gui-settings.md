@@ -1,17 +1,20 @@
 # GUI Settings
 
-The GUI presents several kinds of settings, but it does not own all of them.
+The GUI presents several kinds of settings, but it does not own their persistence.
 This page maps each control to the place that actually persists it.
+
+The GUI only submits settings through Gateway APIs. Gateway selects every
+durable path and performs all settings-file reads, writes, and migrations.
 
 ## Configuration file locations
 
 | Setting group | Configuration location | Notes |
 | --- | --- | --- |
 | Workspace runtime settings | `<workspace>/.tura/config.conf` | Written through the gateway `/session/config` endpoint for the selected workspace directory. |
-| GUI appearance settings | Gateway `/config` state | Stores theme, corner radius, font, font size, and skill-folder settings in the active gateway config state. |
-| Model-tier routes | `TURA_PROVIDER_CONFIG`, or `<runtime-root>/config/provider_config.json`, or `<source-root>/crates/provider/config/provider_config.json` | Written through `/model_config`. The file contains the provider catalog and route table. |
+| GUI appearance settings | Gateway-owned `<TURA_HOME>/.tura/gateway-config.json` | Written through `/config`; stores theme, corner radius, font, font size, and skill-folder settings. |
+| Model-tier routes | Gateway-owned provider config; release materializes `<TURA_HOME>/.tura/provider_config.json` from the bundled catalog | Written through `/model_config`; explicit `TURA_PROVIDER_CONFIG` remains available for development and tests. |
 | Provider credentials | `.env` resolved from `TURA_ENV_PATH`, or the runtime project root `.env` | API keys and OAuth tokens are stored as provider environment variables. |
-| Custom agents | `<project-root>/agents/src/<agent-id>/agent_config.json` and optional `<project-root>/agents/src/<agent-id>/prompt.md` | Written through `/agent` endpoints. Static/default agents cannot be deleted. |
+| Custom agents | Gateway-selected agent config root; release defaults to `<TURA_HOME>/.tura/agents/src/<agent-id>/` | Written through `/agent` endpoints. Source builds retain `<project-root>/agents/src`; static/default agents cannot be deleted. |
 
 ## Application settings
 
@@ -62,12 +65,12 @@ This page maps each control to the place that actually persists it.
 
 | Setting | Stored location | Values | Effect |
 | --- | --- | --- | --- |
-| Agent provider | `<project-root>/agents/src/<agent-id>/agent_config.json`, inside the agent `provider` config | Any provider from the model config options | Sets the provider used by that custom agent. |
-| Agent model | `<project-root>/agents/src/<agent-id>/agent_config.json`, inside the agent `provider` config | Any model available for the selected provider | Sets the model override used by that custom agent. If unset, the agent falls back to its default model tier. |
-| Agent default model tier | `<project-root>/agents/src/<agent-id>/agent_config.json`, inside the agent `provider` config | `thinking`, `fast` | Selects which model tier the agent uses when it has no concrete model override. |
-| Agent reasoning effort | `<project-root>/agents/src/<agent-id>/agent_config.json`, inside the agent `provider` config | `low`, `medium`, `high`, `xhigh`, `max` | Sets the reasoning-effort override for that agent. |
-| Agent priority routing | `<project-root>/agents/src/<agent-id>/agent_config.json`, inside the agent `provider` config | `true`, `false` | Enables priority/accelerated routing for that agent where supported. |
-| Delete agent | `<project-root>/agents/src/<agent-id>/` | Dynamic non-default agents only | Deletes the custom agent directory. Static agents and `default_config` agents are protected. |
+| Agent provider | Gateway-selected `<agent-id>/agent_config.json`, inside the agent `provider` config | Any provider from the model config options | Sets the provider used by that custom agent. |
+| Agent model | Gateway-selected `<agent-id>/agent_config.json`, inside the agent `provider` config | Any model available for the selected provider | Sets the model override used by that custom agent. If unset, the agent falls back to its default model tier. |
+| Agent default model tier | Gateway-selected `<agent-id>/agent_config.json`, inside the agent `provider` config | `thinking`, `fast` | Selects which model tier the agent uses when it has no concrete model override. |
+| Agent reasoning effort | Gateway-selected `<agent-id>/agent_config.json`, inside the agent `provider` config | `low`, `medium`, `high`, `xhigh`, `max` | Sets the reasoning-effort override for that agent. |
+| Agent priority routing | Gateway-selected `<agent-id>/agent_config.json`, inside the agent `provider` config | `true`, `false` | Enables priority/accelerated routing for that agent where supported. |
+| Delete agent | Gateway-selected `<agent-id>/` | Dynamic non-default agents only | Deletes the custom agent directory. Static agents and `default_config` agents are protected. |
 
 ## Personalization settings
 

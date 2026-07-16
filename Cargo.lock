@@ -26,7 +26,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "tura_path",
 ]
 
 [[package]]

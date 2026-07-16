@@ -105,16 +105,16 @@ pub fn strip_verbatim_prefix(path: &str) -> String {
 // ============================================================================
 
 pub async fn get_config() -> Json<Config> {
-    load_persisted_gui_config();
+    load_persisted_gateway_config();
     Json(global_store().get_config())
 }
 
 pub async fn patch_config(
     Json(payload): Json<ConfigPatch>,
 ) -> Result<Json<Config>, (StatusCode, Json<BadRequestError>)> {
-    load_persisted_gui_config();
+    load_persisted_gateway_config();
     let config = global_store().update_config(payload);
-    write_gui_config(&gui_config_path(), &config).map_err(|error| {
+    write_gateway_config(&gateway_config_path(), &config).map_err(|error| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(BadRequestError { error }),
@@ -123,37 +123,47 @@ pub async fn patch_config(
     Ok(Json(config))
 }
 
-fn gui_config_path() -> PathBuf {
+fn gateway_config_path() -> PathBuf {
+    tura_path::home_runtime_dir().join("gateway-config.json")
+}
+
+fn legacy_gui_config_path() -> PathBuf {
     tura_path::home_runtime_dir().join("gui-config.json")
 }
 
-fn load_persisted_gui_config() {
-    let Ok(config) = read_gui_config(&gui_config_path()) else {
+fn load_persisted_gateway_config() {
+    let Some(config) =
+        read_persisted_gateway_config(&gateway_config_path(), &legacy_gui_config_path())
+    else {
         return;
     };
     *global_store().config.write() = config;
 }
 
-fn read_gui_config(path: &Path) -> Result<Config, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|error| format!("failed to read GUI config {}: {error}", path.display()))?;
-    serde_json::from_str(&content)
-        .map_err(|error| format!("failed to parse GUI config {}: {error}", path.display()))
+fn read_persisted_gateway_config(path: &Path, legacy_path: &Path) -> Option<Config> {
+    read_gateway_config(if path.is_file() { path } else { legacy_path }).ok()
 }
 
-fn write_gui_config(path: &Path, config: &Config) -> Result<(), String> {
+fn read_gateway_config(path: &Path) -> Result<Config, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|error| format!("failed to read gateway config {}: {error}", path.display()))?;
+    serde_json::from_str(&content)
+        .map_err(|error| format!("failed to parse gateway config {}: {error}", path.display()))
+}
+
+fn write_gateway_config(path: &Path, config: &Config) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| {
             format!(
-                "failed to create GUI config directory {}: {error}",
+                "failed to create gateway config directory {}: {error}",
                 parent.display()
             )
         })?;
     }
     let content = serde_json::to_string_pretty(config)
-        .map_err(|error| format!("failed to serialize GUI config: {error}"))?;
+        .map_err(|error| format!("failed to serialize gateway config: {error}"))?;
     std::fs::write(path, format!("{content}\n"))
-        .map_err(|error| format!("failed to write GUI config {}: {error}", path.display()))
+        .map_err(|error| format!("failed to write gateway config {}: {error}", path.display()))
 }
 
 pub async fn get_tura_config() -> Json<TuraConfigResponse> {
@@ -568,8 +578,9 @@ pub async fn upgrade(Json(_payload): Json<UpgradeRequest>) -> Json<UpgradeRespon
 #[cfg(test)]
 mod tests {
     use super::{
-        event_matches_session_filter, event_visible_to_frontend, read_gui_config, read_json_config,
-        tura_config_tiers, update_tura_config_tier, write_gui_config, TuraConfigUpdate,
+        event_matches_session_filter, event_visible_to_frontend, read_gateway_config,
+        read_json_config, read_persisted_gateway_config, tura_config_tiers,
+        update_tura_config_tier, write_gateway_config, TuraConfigUpdate,
     };
     use crate::contracts::{
         Config, GlobalEvent, Message, MessageRole, MessageUpdatedProperties,
@@ -577,9 +588,9 @@ mod tests {
     };
 
     #[test]
-    fn gui_config_round_trip_preserves_visual_settings() {
+    fn gateway_config_round_trip_preserves_visual_settings() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let path = temp.path().join("nested").join("gui-config.json");
+        let path = temp.path().join("nested").join("gateway-config.json");
         let config = Config {
             theme: Some("dark".to_string()),
             corner_radius: Some("sharp".to_string()),
@@ -587,12 +598,18 @@ mod tests {
             ..Config::default()
         };
 
-        write_gui_config(&path, &config).expect("write GUI config");
-        let loaded = read_gui_config(&path).expect("read GUI config");
+        write_gateway_config(&path, &config).expect("write gateway config");
+        let loaded = read_gateway_config(&path).expect("read gateway config");
 
         assert_eq!(loaded.theme.as_deref(), Some("dark"));
         assert_eq!(loaded.corner_radius.as_deref(), Some("sharp"));
         assert_eq!(loaded.main_font_size, Some(15));
+
+        let legacy = temp.path().join("gui-config.json");
+        write_gateway_config(&legacy, &config).expect("write legacy config");
+        assert!(
+            read_persisted_gateway_config(&temp.path().join("missing.json"), &legacy).is_some()
+        );
     }
 
     #[test]
